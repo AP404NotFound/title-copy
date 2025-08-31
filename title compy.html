@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Title Extractor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        .container {
+            max-width: 700px;
+            width: 100%;
+            background-color: #ffffff;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            padding: 2.5rem;
+            text-align: center;
+        }
+        input[type="url"] {
+            width: 100%;
+            padding: 1rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            margin-top: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+            transition: all 0.2s ease-in-out;
+        }
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+        }
+        button {
+            padding: 0.75rem 2rem;
+            background-color: #2563eb;
+            color: #ffffff;
+            font-weight: 600;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease-in-out;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        button:hover {
+            background-color: #1d4ed8;
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+        #results-container {
+            margin-top: 2rem;
+            text-align: left;
+        }
+        .video-title {
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            color: #1e40af;
+            word-wrap: break-word;
+        }
+        #message-box {
+            background-color: #fef2f2;
+            color: #ef4444;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1 class="text-3xl font-bold text-gray-800">Video Title Extractor</h1>
+    <p class="mt-2 text-gray-500">Enter a URL to get the titles of the videos on that page.</p>
+
+    <input type="url" id="url-input" placeholder="Paste video page URL here...">
+    
+    <button onclick="fetchVideoTitles()">Get Titles</button>
+
+    <div id="message-box" class="text-sm"></div>
+
+    <div id="results-container">
+        <div id="loading-spinner" class="hidden text-center text-blue-500 mt-4">
+            Loading...
+        </div>
+    </div>
+</div>
+
+<script>
+    function showMessage(message, isError = false) {
+        const messageBox = document.getElementById('message-box');
+        // Check if the message box element exists before trying to access it
+        if (messageBox) {
+            messageBox.textContent = message;
+            messageBox.style.display = 'block';
+            messageBox.style.backgroundColor = isError ? '#fef2f2' : '#dcfce7';
+            messageBox.style.color = isError ? '#ef4444' : '#16a34a';
+        }
+    }
+
+    function hideMessage() {
+        const messageBox = document.getElementById('message-box');
+        // Check if the message box element exists before trying to access it
+        if (messageBox) {
+            messageBox.style.display = 'none';
+        }
+    }
+    
+    async function fetchVideoTitles() {
+        const urlInput = document.getElementById('url-input');
+        const resultsContainer = document.getElementById('results-container');
+        const loadingSpinner = document.getElementById('loading-spinner');
+
+        // Defensive check to ensure all elements are found before proceeding.
+        // This prevents the 'Cannot read properties of null' error.
+        if (!urlInput || !resultsContainer || !loadingSpinner) {
+            console.error('Error: One or more required DOM elements are missing. Please ensure the HTML structure is correct.');
+            return;
+        }
+
+        const url = urlInput.value.trim();
+        if (!url) {
+            showMessage('Please enter a valid URL.', true);
+            return;
+        }
+
+        resultsContainer.innerHTML = '';
+        loadingSpinner.classList.remove('hidden');
+        hideMessage();
+
+        try {
+            // Using a public CORS proxy to bypass CORS issues
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+            const response = await fetch(proxyUrl);
+            
+            if (!response.ok) {
+                throw new Error(`Failed to fetch the URL: ${response.statusText}`);
+            }
+
+            const html = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            // Select video titles based on the structure of the Adobe Stock page
+            // Adjust this selector for different websites
+            const videoTitleElements = doc.querySelectorAll('h2.css-1i5j26l');
+            
+            if (videoTitleElements.length === 0) {
+                showMessage('No video titles found with the current selector.', true);
+            } else {
+                videoTitleElements.forEach(element => {
+                    const titleDiv = document.createElement('div');
+                    titleDiv.className = 'video-title';
+                    titleDiv.textContent = element.textContent.trim();
+                    resultsContainer.appendChild(titleDiv);
+                });
+                showMessage(`Found ${videoTitleElements.length} titles.`, false);
+            }
+        } catch (error) {
+            console.error('Error fetching or parsing content:', error);
+            showMessage(`An error occurred: ${error.message}`, true);
+        } finally {
+            loadingSpinner.classList.add('hidden');
+        }
+    }
+</script>
+
+</body>
+</html>
