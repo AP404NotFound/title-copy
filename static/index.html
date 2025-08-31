@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Title Extractor</title>
+    <style>
+        :root {
+            --bg: #0b1020;
+            --panel: #11182b;
+            --text: #e6ecff;
+            --muted: #8aa0d0;
+            --primary: #5b8cff;
+            --border: #223055;
+            --success: #3bcf8e;
+            --danger: #ff6b6b;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+            background: radial-gradient(1200px 800px at 20% -10%, #1b2450, transparent), var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 880px;
+            margin: 0 auto;
+            padding: 32px 16px 64px;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        h1 { font-size: 24px; margin: 0; letter-spacing: 0.3px; }
+        .panel {
+            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+        }
+        .row { display: flex; gap: 12px; }
+        input[type="url"] {
+            flex: 1;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: #0e1530;
+            color: var(--text);
+            outline: none;
+        }
+        input[type="url"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.2); }
+        button {
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: linear-gradient(180deg, #2b3f7b, #1a2a5a);
+            color: white;
+            cursor: pointer;
+            transition: transform 0.05s ease-in-out, filter 0.15s ease;
+        }
+        button:active { transform: translateY(1px); }
+        button[disabled] { filter: grayscale(0.6) brightness(0.7); cursor: not-allowed; }
+        .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+        .results { margin-top: 18px; }
+        .count { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+        ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+        li { padding: 10px 12px; background: #0e1530; border: 1px solid var(--border); border-radius: 10px; }
+        .error { color: var(--danger); margin-top: 12px; }
+        footer { margin-top: 32px; color: var(--muted); font-size: 12px; text-align: center; }
+    </style>
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
+    <meta name="color-scheme" content="dark light" />
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Video Title Extractor</h1>
+        </header>
+
+        <div class="panel">
+            <div class="row">
+                <input id="url" type="url" placeholder="Paste a link (playlist, channel, page, etc.)" />
+                <button id="extractBtn">Extract Titles</button>
+            </div>
+            <div class="hint">Examples: YouTube playlist or channel URL, Vimeo album, etc.</div>
+            <div id="error" class="error" style="display:none"></div>
+            <div class="results" id="results" style="display:none">
+                <div class="count" id="count"></div>
+                <ul id="titles"></ul>
+            </div>
+        </div>
+
+        <footer>
+            No downloads happen. We only query metadata to list titles.
+        </footer>
+    </div>
+
+    <script>
+        const urlInput = document.getElementById('url');
+        const btn = document.getElementById('extractBtn');
+        const results = document.getElementById('results');
+        const titlesList = document.getElementById('titles');
+        const countEl = document.getElementById('count');
+        const errorEl = document.getElementById('error');
+
+        async function extract() {
+            errorEl.style.display = 'none';
+            results.style.display = 'none';
+            titlesList.innerHTML = '';
+            countEl.textContent = '';
+            const url = urlInput.value.trim();
+            if (!url) {
+                errorEl.textContent = 'Please paste a link.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = 'Extracting…';
+            try {
+                const res = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data?.detail || 'Request failed');
+                }
+                const titles = Array.isArray(data.titles) ? data.titles : [];
+                countEl.textContent = `${titles.length} title${titles.length === 1 ? '' : 's'} found`;
+                titles.forEach(t => {
+                    const li = document.createElement('li');
+                    li.textContent = String(t);
+                    titlesList.appendChild(li);
+                });
+                results.style.display = 'block';
+            } catch (err) {
+                errorEl.textContent = err?.message || String(err);
+                errorEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Extract Titles';
+            }
+        }
+
+        btn.addEventListener('click', extract);
+        urlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') extract();
+        });
+    </script>
+</body>
+</html>
+
