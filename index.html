@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Title Extractor</title>
+    <title>Universal Video Title Extractor</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -17,7 +17,7 @@
             padding: 1rem;
         }
         .container {
-            max-width: 700px;
+            max-width: 900px;
             width: 100%;
             background-color: #ffffff;
             border-radius: 1rem;
@@ -25,7 +25,7 @@
             padding: 2.5rem;
             text-align: center;
         }
-        input[type="url"] {
+        textarea#url-input {
             width: 100%;
             padding: 1rem;
             border: 1px solid #d1d5db;
@@ -34,14 +34,16 @@
             margin-bottom: 1.5rem;
             box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
             transition: all 0.2s ease-in-out;
+            min-height: 100px;
+            resize: vertical;
         }
-        input[type="url"]:focus {
+        textarea#url-input:focus {
             outline: none;
             border-color: #3b82f6;
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
         }
         button {
-            padding: 0.75rem 2rem;
+            padding: 0.5rem 1rem;
             background-color: #2563eb;
             color: #ffffff;
             font-weight: 600;
@@ -55,8 +57,11 @@
             background-color: #1d4ed8;
             box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
         }
+        .controls { display:flex; gap:.5rem; justify-content:center; margin-top:.75rem; flex-wrap:wrap; }
+        .small { padding:.5rem .75rem; font-size:.9rem; }
+        .input { padding:.5rem; border:1px solid #e5e7eb; border-radius:.375rem; }
         #results-container {
-            margin-top: 2rem;
+            margin-top: 1.25rem;
             text-align: left;
         }
         .video-title {
@@ -69,6 +74,11 @@
             color: #1e40af;
             word-wrap: break-word;
         }
+        .video-title.error {
+            background-color: #fff1f2;
+            color: #991b1b;
+            border-left-color: #ef4444;
+        }
         #message-box {
             background-color: #fef2f2;
             color: #ef4444;
@@ -77,104 +87,352 @@
             margin-top: 1rem;
             display: none;
         }
+        #progress {
+            margin-top: 1rem;
+            font-size: 0.95rem;
+            color: #374151;
+        }
+        .meta-row { display:flex; gap:.5rem; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:.5rem;}
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1 class="text-3xl font-bold text-gray-800">Video Title Extractor</h1>
-    <p class="mt-2 text-gray-500">Enter a URL to get the titles of the videos on that page.</p>
+    <h1 class="text-3xl font-bold text-gray-800">Universal Video Title Extractor</h1>
+    <p class="mt-2 text-gray-500">Enter one or multiple URLs (one per line). For Adobe Stock search pages you can paste the search URL and it will try to extract asset links automatically.</p>
 
-    <input type="url" id="url-input" placeholder="Paste video page URL here...">
+    <textarea id="url-input" placeholder="Paste one or more URLs here, one per line..."></textarea>
     
-    <button onclick="fetchVideoTitles()">Get Titles</button>
+    <div class="meta-row">
+        <label class="text-sm text-gray-600">Concurrency:</label>
+        <input id="concurrency" class="input small" type="number" min="1" max="20" value="4" />
+        <label class="text-sm text-gray-600">Proxy (optional):</label>
+        <input id="proxy-url" class="input" type="text" placeholder="https://your-proxy.example/?url=" style="min-width:320px" value="https://corsproxy.io/?" />
+    </div>
+
+    <div class="meta-row">
+        <label class="text-sm text-gray-600">Auth token / Cookie (optional - only works if your proxy forwards it):</label>
+        <input id="auth-token" class="input" type="text" placeholder="Authorization or Cookie header value" style="min-width:420px" />
+    </div>
+
+    <div class="controls">
+        <button id="get-titles-button" class="small">Get Titles</button>
+        <button id="export-csv-button" class="small" disabled>Export CSV</button>
+        <button id="clear-button" class="small">Clear Results</button>
+    </div>
 
     <div id="message-box" class="text-sm"></div>
+    <div id="progress" class="hidden"></div>
 
     <div id="results-container">
-        <div id="loading-spinner" class="hidden text-center text-blue-500 mt-4">
-            Loading...
-        </div>
+        <div id="loading-spinner" class="hidden text-center text-blue-500 mt-4">Loading...</div>
     </div>
 </div>
 
 <script>
-    function showMessage(message, isError = false) {
-        const messageBox = document.getElementById('message-box');
-        // Check if the message box element exists before trying to access it
-        if (messageBox) {
-            messageBox.textContent = message;
-            messageBox.style.display = 'block';
-            messageBox.style.backgroundColor = isError ? '#fef2f2' : '#dcfce7';
-            messageBox.style.color = isError ? '#ef4444' : '#16a34a';
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- UI Utility Functions ---
+        function showMessage(message, isError = false) {
+            const messageBox = document.getElementById('message-box');
+            if (messageBox) {
+                messageBox.textContent = message;
+                messageBox.style.display = 'block';
+                messageBox.style.backgroundColor = isError ? '#fef2f2' : '#dcfce7';
+                messageBox.style.color = isError ? '#ef4444' : '#16a34a';
+            }
         }
-    }
 
-    function hideMessage() {
-        const messageBox = document.getElementById('message-box');
-        // Check if the message box element exists before trying to access it
-        if (messageBox) {
-            messageBox.style.display = 'none';
+        function hideMessage() {
+            const messageBox = document.getElementById('message-box');
+            if (messageBox) {
+                messageBox.style.display = 'none';
+            }
         }
-    }
-    
-    async function fetchVideoTitles() {
-        const urlInput = document.getElementById('url-input');
+
+        function setProgress(text) {
+            const p = document.getElementById('progress');
+            if (p) {
+                p.textContent = text;
+                p.classList.remove('hidden');
+            }
+        }
+
+        function clearProgress() {
+            const p = document.getElementById('progress');
+            if (p) {
+                p.textContent = '';
+                p.classList.add('hidden');
+            }
+        }
+        
+        // --- Helpers ---
+        function splitLines(text) {
+            return text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        }
+        function absoluteUrl(base, href) {
+            try { return new URL(href, base).href; } catch(e) { return href; }
+        }
+        function downloadBlob(filename, content, mime='text/csv;charset=utf-8;') {
+            const blob = new Blob([content], { type: mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        // --- Concurrency helper ---
+        async function limitedMap(items, fn, concurrency = 4) {
+            const results = [];
+            let index = 0;
+            const workers = new Array(Math.min(concurrency, items.length)).fill(null).map(async () => {
+                while (index < items.length) {
+                    const i = index++;
+                    try {
+                        results[i] = await fn(items[i], i);
+                    } catch (e) {
+                        results[i] = { success:false, error: e && e.message ? e.message : String(e) };
+                    }
+                }
+            });
+            await Promise.all(workers);
+            return results;
+        }
+
+        // --- Fetch via proxy (with optional auth token param) ---
+        function buildProxyUrl(proxyBase, targetUrl, authToken) {
+            // If proxyBase already contains '?' we append params accordingly
+            // We assume proxy supports either raw ?url=... or direct path ?{encoded-url}
+            try {
+                // handle common corsproxy.io which expects full URL after '?'
+                if (proxyBase.includes('corsproxy.io') || proxyBase.endsWith('?')) {
+                    return `${proxyBase}${encodeURIComponent(targetUrl)}` + (authToken ? `&__auth=${encodeURIComponent(authToken)}` : '');
+                }
+                // if proxy has query param name 'url=' present
+                if (proxyBase.includes('=') && proxyBase.includes('url')) {
+                    return `${proxyBase}${encodeURIComponent(targetUrl)}` + (authToken ? `&__auth=${encodeURIComponent(authToken)}` : '');
+                }
+                // default: append as ?url=
+                const sep = proxyBase.includes('?') ? '&' : '?';
+                return `${proxyBase}${sep}url=${encodeURIComponent(targetUrl)}` + (authToken ? `&__auth=${encodeURIComponent(authToken)}` : '');
+            } catch (e) {
+                return `${proxyBase}${encodeURIComponent(targetUrl)}`;
+            }
+        }
+
+        async function fetchHtmlViaProxy(url, proxyBase, authToken) {
+            const proxyUrl = buildProxyUrl(proxyBase || 'https://corsproxy.io/?', url, authToken || '');
+            const res = await fetch(proxyUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.text();
+        }
+
+        // --- Normalize Google Drive file links to a direct-download/preview URL ---
+        function normalizeDriveUrl(url) {
+            try {
+                const u = new URL(url);
+                if (u.hostname.includes('drive.google.com')) {
+                    // file with /file/d/ID
+                    const m = u.pathname.match(/\/file\/d\/([^\/]+)/);
+                    if (m && m[1]) {
+                        return `https://drive.google.com/uc?export=download&id=${m[1]}`;
+                    }
+                    // open?id=ID
+                    const id = u.searchParams.get('id');
+                    if (id) return `https://drive.google.com/uc?export=download&id=${id}`;
+                    // folder or other: not supported client-side
+                    return null;
+                }
+            } catch (e) { return null; }
+            return url;
+        }
+
+        // --- Title scraping logic ---
+        async function scrapeTitle(url, proxyBase, authToken) {
+            try {
+                // special-case Google Drive file links
+                if (url.includes('drive.google.com')) {
+                    const converted = normalizeDriveUrl(url);
+                    if (!converted) {
+                        return { success:false, error: 'Drive folder or unsupported Drive link — folder listing requires Drive API / authentication.' };
+                    }
+                    url = converted;
+                }
+
+                const html = await fetchHtmlViaProxy(url, proxyBase, authToken);
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+
+                // Try common locations
+                const selectors = [
+                    'meta[property="og:title"]',
+                    'meta[name="twitter:title"]',
+                    'meta[name="title"]',
+                    'title'
+                ];
+                for (const sel of selectors) {
+                    const el = doc.querySelector(sel);
+                    if (el) {
+                        const value = el.content || el.textContent || el.getAttribute('content');
+                        if (value && value.trim()) return { success: true, title: value.trim() };
+                    }
+                }
+
+                // Try H1 or first heading
+                const h1 = doc.querySelector('h1');
+                if (h1 && h1.textContent.trim()) {
+                    return { success: true, title: h1.textContent.trim() };
+                }
+
+                // Fallback to filename from URL
+                try {
+                    const u = new URL(url);
+                    const path = u.pathname.split('/').filter(Boolean);
+                    if (path.length) {
+                        const last = decodeURIComponent(path[path.length - 1]);
+                        const name = last.replace(/\.[^/.]+$/, '');
+                        if (name) return { success: true, title: name };
+                    }
+                } catch (e) { /* ignore */ }
+
+                return { success: false, error: 'Title not found in HTML' };
+            } catch (error) {
+                return { success: false, error: error.message || 'Fetch error' };
+            }
+        }
+
+        // --- Adobe extract (unchanged) ---
+        async function extractAssetLinksFromAdobeSearch(searchUrl, proxyBase, authToken) {
+            try {
+                const html = await fetchHtmlViaProxy(searchUrl, proxyBase, authToken);
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+
+                const anchors = Array.from(doc.querySelectorAll('a[href]'));
+                const candidate = anchors
+                    .map(a => a.getAttribute('href'))
+                    .filter(href => href && (href.includes('/video/') || href.includes('/stock-video') || href.includes('asset/')))
+                    .map(href => absoluteUrl(searchUrl, href));
+
+                return Array.from(new Set(candidate));
+            } catch (err) {
+                console.error('Failed to extract asset links:', err);
+                return [];
+            }
+        }
+
+        // --- Main ---
+        const getTitlesButton = document.getElementById('get-titles-button');
+        const exportCsvButton = document.getElementById('export-csv-button');
+        const clearButton = document.getElementById('clear-button');
         const resultsContainer = document.getElementById('results-container');
         const loadingSpinner = document.getElementById('loading-spinner');
 
-        // Defensive check to ensure all elements are found before proceeding.
-        // This prevents the 'Cannot read properties of null' error.
-        if (!urlInput || !resultsContainer || !loadingSpinner) {
-            console.error('Error: One or more required DOM elements are missing. Please ensure the HTML structure is correct.');
-            return;
+        let lastResults = [];
+
+        if (getTitlesButton) {
+            getTitlesButton.addEventListener('click', async () => {
+                const urlInput = document.getElementById('url-input');
+                const concurrencyInput = document.getElementById('concurrency');
+                const proxyInput = document.getElementById('proxy-url');
+                const authInput = document.getElementById('auth-token');
+
+                if (!urlInput || !resultsContainer || !loadingSpinner) {
+                    showMessage('Initialization error.', true);
+                    return;
+                }
+
+                const raw = urlInput.value.trim();
+                if (!raw) {
+                    showMessage('Please enter at least one URL.', true);
+                    return;
+                }
+
+                hideMessage();
+                resultsContainer.innerHTML = '';
+                loadingSpinner.classList.remove('hidden');
+                exportCsvButton.disabled = true;
+                lastResults = [];
+
+                let urls = splitLines(raw);
+                const proxyBase = proxyInput.value.trim() || 'https://corsproxy.io/?';
+                const authToken = authInput.value.trim();
+
+                // Adobe search expansion
+                if (urls.length === 1 && urls[0].includes('stock.adobe.com/search')) {
+                    setProgress('Detecting Adobe Stock asset links...');
+                    const assets = await extractAssetLinksFromAdobeSearch(urls[0], proxyBase, authToken);
+                    if (assets.length) {
+                        urls = assets;
+                    } else {
+                        showMessage('No asset links found on the Adobe Stock search page; processing the provided URL.', false);
+                    }
+                }
+
+                setProgress('Starting processing...');
+                const concurrency = Math.max(1, parseInt(concurrencyInput.value, 10) || 4);
+
+                const results = await limitedMap(urls, async (u, idx) => {
+                    setProgress(`Processing ${idx+1} of ${urls.length}...`);
+                    const r = await scrapeTitle(u, proxyBase, authToken);
+                    const out = Object.assign({ url: u, index: idx+1 }, r);
+                    // update UI incrementally
+                    const div = document.createElement('div');
+                    div.className = 'video-title';
+                    if (out.success && out.title) {
+                        div.textContent = `${out.index}. ${out.title}`;
+                    } else {
+                        div.classList.add('error');
+                        div.textContent = `${out.index}. [ERROR] ${out.error || 'Unknown error'} — ${u}`;
+                    }
+                    resultsContainer.appendChild(div);
+                    return out;
+                }, concurrency);
+
+                lastResults = results;
+                exportCsvButton.disabled = results.length === 0;
+                setProgress(`Done: processed ${results.length} URL(s).`);
+                loadingSpinner.classList.add('hidden');
+                showMessage(`Processed ${results.length} URL(s).`, false);
+                setTimeout(clearProgress, 3000);
+            });
         }
 
-        const url = urlInput.value.trim();
-        if (!url) {
-            showMessage('Please enter a valid URL.', true);
-            return;
+        if (exportCsvButton) {
+            exportCsvButton.addEventListener('click', () => {
+                if (!lastResults || lastResults.length === 0) {
+                    showMessage('No results to export.', true);
+                    return;
+                }
+                const rows = [['Index','URL','Title','Success','Error']];
+                for (const r of lastResults) {
+                    rows.push([
+                        r.index || '',
+                        r.url || '',
+                        r.title ? r.title.replace(/"/g,'""') : '',
+                        r.success ? 'true' : 'false',
+                        r.error ? (r.error+'').replace(/"/g,'""') : ''
+                    ]);
+                }
+                const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\r\n');
+                downloadBlob('titles_export.csv', csv, 'text/csv;charset=utf-8;');
+            });
         }
 
-        resultsContainer.innerHTML = '';
-        loadingSpinner.classList.remove('hidden');
-        hideMessage();
-
-        try {
-            // Using a public CORS proxy to bypass CORS issues
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-            const response = await fetch(proxyUrl);
-            
-            if (!response.ok) {
-                throw new Error(`Failed to fetch the URL: ${response.statusText}`);
-            }
-
-            const html = await response.text();
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-
-            // Select video titles based on the structure of the Adobe Stock page
-            // Adjust this selector for different websites
-            const videoTitleElements = doc.querySelectorAll('h2.css-1i5j26l');
-            
-            if (videoTitleElements.length === 0) {
-                showMessage('No video titles found with the current selector.', true);
-            } else {
-                videoTitleElements.forEach(element => {
-                    const titleDiv = document.createElement('div');
-                    titleDiv.className = 'video-title';
-                    titleDiv.textContent = element.textContent.trim();
-                    resultsContainer.appendChild(titleDiv);
-                });
-                showMessage(`Found ${videoTitleElements.length} titles.`, false);
-            }
-        } catch (error) {
-            console.error('Error fetching or parsing content:', error);
-            showMessage(`An error occurred: ${error.message}`, true);
-        } finally {
-            loadingSpinner.classList.add('hidden');
+        if (clearButton) {
+            clearButton.addEventListener('click', () => {
+                resultsContainer.innerHTML = '';
+                lastResults = [];
+                exportCsvButton.disabled = true;
+                hideMessage();
+                clearProgress();
+            });
         }
-    }
+
+    });
 </script>
 
 </body>
